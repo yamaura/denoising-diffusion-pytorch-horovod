@@ -7,8 +7,9 @@ ARG CUDNN_VERSION=8.9.7.29-1+cuda11.8
 ARG DOCKER_NCCL_VERSION=2.15.5-1+cuda11.8
 ARG PYTORCH_VERSION=2.0.1+cu118
 ARG TORCHVISION_VERSION=0.15.2+cu118
+ARG HOROVOD_VERSION=0.28.1
 
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.10
 
 # to avoid interaction with apt-get
 ENV DEBIAN_FRONTEND=noninteractive
@@ -47,13 +48,25 @@ RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-
         openjdk-8-jdk-headless \
         openssh-client \
         openssh-server \
+        libhwloc-dev \
+        libevent-dev \
+        libpsm2-dev \
+        libfabric-dev \
+        libnl-route-3-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Open MPI
-RUN wget --progress=dot:mega -O /tmp/openmpi-4.1.4-bin.tar.gz https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.4.tar.gz && \
-    cd /tmp && tar -zxf /tmp/openmpi-4.1.4-bin.tar.gz && \
-    mkdir openmpi-4.1.4/build && cd openmpi-4.1.4/build && ../configure --prefix=/usr/local && \
+RUN curl -sfL https://download.open-mpi.org/release/open-mpi/v4.0/openmpi-4.0.3.tar.gz | tar zx -C /tmp && \
+    cd /tmp/openmpi-4.0.3 && ./configure \
+        --prefix=/usr/local \
+        --with-psm2=/usr \
+        --with-libfabric=/usr \
+        --enable-mca-no-build=btl-openib \
+        --without-verbs \
+        --with-hwloc=external \
+        --with-libevent=external && \
     make -j all && make install && ldconfig && \
+    cd / && rm -rf /tmp/openmpi-4.0.3 && \
     mpirun --version
 
 # Allow OpenSSH to talk to containers without asking for confirmation
@@ -75,7 +88,7 @@ RUN pip install --no-cache-dir \
 
 # Install Horovod, temporarily using CUDA stubs
 RUN ldconfig /usr/local/cuda/targets/x86_64-linux/lib/stubs && \
-    bash -c "HOROVOD_GPU_OPERATIONS=NCCL HOROVOD_WITH_TENSORFLOW=0 HOROVOD_WITH_PYTORCH=1 HOROVOD_WITH_MXNET=0 pip install --no-cache-dir -v horovod" && \
+    bash -c "HOROVOD_GPU_OPERATIONS=NCCL HOROVOD_WITH_TENSORFLOW=0 HOROVOD_WITH_PYTORCH=1 HOROVOD_WITH_MXNET=0 pip install --no-cache-dir -v horovod==${HOROVOD_VERSION}" && \
     horovodrun --check-build && \
     ldconfig
 
