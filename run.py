@@ -35,6 +35,7 @@ parser.add_argument('--log_interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--data_dir',
                     help='location of the training dataset')
+parser.add_argument('--profile', type=str, default=None)
 
 class Dataset(Dataset):
     def __init__(
@@ -76,11 +77,21 @@ class Dataset(Dataset):
         ])
 
         self.device = device
+        self.image0 = self.raw_image(0)
+
+    def raw_image(self, index):
+        from torchvision.io import read_image
+
+        path = self.paths[index]
+        img = read_image(str(path))
+        img = img.to(self.device).to(torch.float32)
+        return img
 
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, index):
+        """
         from PIL import Image
         from torchvision.io import read_image
 
@@ -91,6 +102,10 @@ class Dataset(Dataset):
         path = self.paths[index]
         img = read_image(str(path))
         img = self.transform(img.to(self.device).to(torch.float32))
+        return img
+        """
+        img = self.image0
+        img = self.transform(img)
         return img
 
 
@@ -104,9 +119,10 @@ class Trainer:
         *,
         train_batch_size = 16,
         augment_horizontal_flip = True,
-        lr = 1e-7,
+        lr = 1e-8,
         momentum = 0.5,
         log_interval = 1000,
+        profile = None,
     ):
         self.size = size
         self.rank = rank
@@ -126,6 +142,8 @@ class Trainer:
         self.momentum = momentum
 
         self.log_interval = log_interval
+
+        self.profile = profile
 
         self.init_hvd()
 
@@ -151,6 +169,9 @@ class Trainer:
         # Horovod: set epoch to sampler for shuffling.
         self.train_sampler.set_epoch(epoch)
         for batch_idx, data in enumerate(self.dl):
+            if self.profile is not None:
+                if batch_idx > 8*3 - 1:
+                    break
             data = data.cuda()
             data = self.ds.transform(data)
             self.optimizer.zero_grad()
@@ -165,6 +186,8 @@ class Trainer:
     def train(self, epochs):
         for epoch in range(1, epochs + 1):
             self.train_epoch(epoch)
+            if self.profile is not None:
+                break
 
 def main(args):
     hvd.init()
@@ -194,6 +217,7 @@ def main(args):
         diffusion,
         args.data_dir,
         train_batch_size = args.train_batch_size,
+        profile = args.profile
         )
 
     if hvd.size() == 0:
